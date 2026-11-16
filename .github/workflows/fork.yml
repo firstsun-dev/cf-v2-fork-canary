@@ -1,0 +1,43 @@
+name: fork canary
+on:
+  pull_request:
+permissions:
+  contents: read
+  actions: read
+  deployments: write
+  pull-requests: write
+jobs:
+  cf:
+    uses: firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml@94651d87c052d69dd5e5677639e129117ff21ff7
+    permissions:
+      contents: write
+      deployments: write
+      pull-requests: write
+      actions: read
+    with:
+      app_name: fork-canary
+      # A caller can ask for a (privileged) self-hosted runner; a fork PR must IGNORE it and run on the approved GitHub-hosted runner only.
+      runner: self-hosted-privileged-does-not-exist
+      build_cmd: 'true'
+      preview_policy: pr
+      verify_tasks: '[{"id":"isolation","cmd":"test \"$RUNNER_ENVIRONMENT\" = github-hosted && test -z \"${CLOUDFLARE_API_TOKEN:-}\" && test -z \"${CF_DUMMY:-}\" && echo hosted-runner-no-secrets"}]'
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_DUMMY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_DUMMY }}
+  expect:
+    name: Expect (fork isolation)
+    if: always()
+    needs: cf
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          SECRET_VISIBLE: ${{ secrets.CF_DUMMY != '' }}
+        run: |
+          echo "is_fork=$IS_FORK secret_visible=$SECRET_VISIBLE"
+          .github/g1/assert-jobs.sh "cf / CI / Verify (isolation)=success" "cf / CI / Gate=success" "cf / Plan=skipped" "cf / Build=skipped" "cf / Migrate=skipped" "cf / delivery=skipped"
